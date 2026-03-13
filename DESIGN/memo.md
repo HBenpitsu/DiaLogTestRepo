@@ -12,37 +12,37 @@
     - 設定画面（Settings）へ誘導し、「BYOK (Bring Your Own Key) モード」への切り替えと、自身の Gemini API キーの登録を促す。
 
 ### その他未実装機能の扱い
-- `MAYBE` や `FUTURE` 要件に含まれる機能が未実装の場合も、共通の `UnimplementedError` をスローし、フロントエンド側で「この機能は現在開発中です」等のトーストを表示する設計とする。
+- `MAYBE` や `FUTURE` 要件に含まれる機能が未実装の場合も、共通の `UnimplementedError` をスローし、UIServer側で「この機能は現在開発中です」等のトーストを表示する設計とする。
 
 ## 認証・認可とトークン配布に関する検討 (Auth & Deployment)
 
-運用モード（クラウド/セルフホスト）によって、フロントエンドとバックエンドの物理的な配置が異なるため、トークンの配布と Cookie の制御には以下の違いが生じる。
+運用モード（クラウド/セルフホスト）によって、UIServerとDiaLogCoreの物理的な配置が異なるため、トークンの配布と Cookie の制御には以下の違いが生じる。
 
 ### 1. 運用モード別のデプロイ構成と通信戦略
 
 | 項目 | クラウドモード (Cloud) | セルフホストモード (Self-host) |
 | :--- | :--- | :--- |
-| **デプロイ構成** | **分離構成** (Frontend: Vercel/Cloudfront, Backend: Cloud Run 等) | **統合構成** (Backend バイナリが Frontend の静的ファイルをホスト) |
+| **デプロイ構成** | **分離構成** (UIServer: Vercel/Cloudfront, DiaLogCore: Cloud Run 等) | **統合構成** (DiaLogCore バイナリが UIServer の静的ファイルをホスト) |
 | **オリジン** | **クロスオリジン/サブドメイン** (例: `app.ex.com` と `api.ex.com`) | **シングルオリジン** (例: `localhost:8080` のみ) |
-| **トークン配布** | Google SSO 連携後、バックエンドが `Auth Token` (JWT) を発行。 | 起動時に生成された `Local Auth Token` を初回アクセス時に `Set-Cookie`。 |
+| **トークン配布** | Google SSO 連携後、DiaLogCoreが `Auth Token` (JWT) を発行。 | 起動時に生成された `Local Auth Token` を初回アクセス時に `Set-Cookie`。 |
 | **Cookie 属性** | `Domain=.ex.com`, `Secure`, `SameSite=Lax/None` 等の調整が必要。 | `SameSite=Strict` が利用可能。 |
 | **CORS 設定** | 必須。`Access-Control-Allow-Credentials: true` 等が必要。 | 不要。 |
 
 ### 2. クラウドデプロイ（分離構成）時の勘案事項
 
-- **クロスオリジン制約**: フロントエンドとバックエンドが異なるドメイン/サブドメインになるため、Cookie のやり取りには適切な CORS 設定が不可欠である。
+- **クロスオリジン制約**: UIServerとDiaLogCoreが異なるドメイン/サブドメインになるため、Cookie のやり取りには適切な CORS 設定が不可欠である。
 - **セキュリティ**: `Secure` 属性（HTTPS必須）および `HttpOnly` の徹底が必要。また、CSRF 対策として `SameSite` 属性の適切な選択（サブドメイン間であれば `Lax`、完全な別ドメインであれば `None` + `Secure`）が求められる。
-- **スケーラビリティ**: フロントエンドを CDN 等で配信できるため、静的アセットの配信負荷をバックエンドから切り離せる。
+- **スケーラビリティ**: フロントエンドを CDN 等で配信できるため、静的アセットの配信負荷をDiaLogCoreから切り離せる。
 
 ### 3. セルフホスト（統合構成/シングルオリジン）時の勘案事項
 
-- **ポータビリティ**: バックエンドが静的ファイルをホストすることで、ユーザーは単一の実行ファイルを起動するだけで環境が整う。
+- **ポータビリティ**: DiaLogCoreが静的ファイルをホストすることで、ユーザーは単一の実行ファイルを起動するだけで環境が整う。
 - **セキュリティの簡素化**: シングルオリジンとなるため CORS 設定が不要になり、Cookie も `SameSite=Strict` を用いた最も堅牢な設定を容易に適用できる。
 - **Local Auth Token の重要性**: シングルオリジンであっても、同一デバイス内の別プロセスやブラウザの別タブ（悪意あるサイト）からの攻撃を防ぐため、起動ごとに動的に生成されるトークンによる認可が必要である。
 
 ### 4. 実装上の対応方針
 
-バックエンドの `Auth Middleware` は、環境変数（`APP_MODE`）によってこれら2つの挙動を切り替える必要がある。
+DiaLogCoreの `Auth Middleware` は、環境変数（`APP_MODE`）によってこれら2つの挙動を切り替える必要がある。
 
 - **Cloud**: JWT の検証と `userId` (Google ID) の抽出。
 - **Self-host**: メモリ上の `Local Auth Token` との一致確認と、固定 `userId` (`local-user`) の注入。
